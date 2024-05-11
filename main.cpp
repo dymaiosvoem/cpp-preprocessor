@@ -10,17 +10,87 @@
 using namespace std;
 using filesystem::path;
 
+void PrintError(const string& dest, const string& src, int string_number) {
+    cout << "unknown include file "s << dest << " at file " 
+        << src << " at line "s << string_number << endl;
+}
+
 path operator""_p(const char* data, std::size_t sz) {
     return path(data, data + sz);
 }
+ 
+bool Preprocess(istream& input, ostream& output, const path& file_name, const vector<path>& include_directories) {
+    static regex local_reg (R"/(\s*#\s*include\s*"([^"]*)"\s*)/");
+    static regex remote_reg (R"/(\s*#\s*include\s*<([^>]*)>\s*)/");
+    smatch matched;
+    int string_counter = 0;
+    for (string str; getline(input, str); ) {
+        ++string_counter;
+        bool outside_find = false;
+        path next_path;
+        if (regex_match(str, matched, local_reg)) {
+            next_path = file_name.parent_path() / string(matched[1]);
+            if (filesystem::exists(next_path)) {
+                ifstream in(next_path.string(), ios::in);
+                if (in.is_open()) {
+                    if (!Preprocess(in, output, next_path.string(), include_directories)) {
+                        return false;
+                    }
+                    continue;
+                }
+                else {
+                    PrintError(next_path.filename().string(), file_name.string(), string_counter);
+                    return false;
+                }
+            }
+            else {
+                outside_find = true;
+            }
+        }
+        if (outside_find || regex_match(str, matched, remote_reg)) {
+            bool finded = false;
+            for (const auto& dir : include_directories) {
+                next_path = dir / string(matched[1]);
+                if (filesystem::exists(next_path)) {
+                    ifstream in(next_path.string(), ios::in);
+                    if (in.is_open()) {
+                        if (!Preprocess(in, output, next_path.string(), include_directories)) {
+                            return false;
+                        }
+                        finded = true;
+                        break;
+                    }
+                    else {
+                        PrintError(next_path.filename().string(), file_name.string(), string_counter);
+                        return false;
+                    }
+                }
+            }
+            if (!finded) {
+                PrintError(next_path.filename().string(), file_name.string(), string_counter);
+                return false;
+            }
+            continue;
+        }
+        output << str << endl;
+    }
+    return true;
+}
 
-// напишите эту функцию
-bool Preprocess(const path& in_file, const path& out_file, const vector<path>& include_directories);
+bool Preprocess(const path& in_file, const path& out_file, const vector<path>& include_directories) {
+    if (!filesystem::exists(in_file)) {
+        return false;
+    }
+    ifstream in(in_file.string(), ios::in);
+    if (!in) {
+        return false;
+    }
+    ofstream out(out_file, ios::out);
+    return Preprocess(in, out, in_file, include_directories);
+}
 
 string GetFileContents(string file) {
     ifstream stream(file);
-
-    // конструируем string по двум итераторам
     return {(istreambuf_iterator<char>(stream)), istreambuf_iterator<char>()};
 }
 
